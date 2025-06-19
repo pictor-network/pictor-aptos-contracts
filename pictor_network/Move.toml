@@ -1,0 +1,16 @@
+[package]
+name = "pictor_network"
+version = "1.0.0"
+authors = []
+
+[addresses]
+pictor_network = "_"
+deployer = "_"
+[dev-addresses]
+
+
+[dependencies]
+AptosFramework = { local = "../framework/aptos-framework" }
+AptosToken = { local = "../framework/aptos-token" }
+AptosTokenObjects = { local = "../framework/aptos-token-objects" }
+[dev-dependencies]

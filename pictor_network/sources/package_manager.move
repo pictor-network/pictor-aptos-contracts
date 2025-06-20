@@ -21,12 +21,12 @@ module pictor_network::package_manager {
         /// Required to obtain the resource account signer.
         signer_cap: SignerCapability,
         /// Track the addresses created by the modules in this package.
-        addresses: SmartTable<String, address>,
+        addresses: SmartTable<String, address>
     }
 
     struct AdministrativeData has key {
         governance: address,
-        operator: address,
+        operator: address
     }
 
     #[view]
@@ -37,20 +37,28 @@ module pictor_network::package_manager {
     /// Initialize PermissionConfig to establish control over the resource account.
     /// This function is invoked only when this package is deployed the first time.
     fun init_module(pictor_signer: &signer) acquires PermissionConfig {
-        let signer_cap = resource_account::retrieve_resource_account_cap(pictor_signer, @deployer);
-        move_to(pictor_signer, PermissionConfig {
-            addresses: smart_table::new<String, address>(),
-            signer_cap,
-        });
-        let pakage_manager_constructor_ref = &object::create_object_from_account(&get_signer());
-        let pakage_manager_signer = &object::generate_signer(pakage_manager_constructor_ref);
-        add_address(string::utf8(PACKAGE_MANAGER_OBJECT_NAME), signer::address_of(pakage_manager_signer));
-        move_to(pakage_manager_signer, AdministrativeData {
-            operator: @deployer,
-            governance: @deployer,
-        });
+        let signer_cap =
+            resource_account::retrieve_resource_account_cap(pictor_signer, @deployer);
+        move_to(
+            pictor_signer,
+            PermissionConfig {
+                addresses: smart_table::new<String, address>(),
+                signer_cap
+            }
+        );
+        let pakage_manager_constructor_ref =
+            &object::create_object_from_account(&get_signer());
+        let pakage_manager_signer =
+            &object::generate_signer(pakage_manager_constructor_ref);
+        add_address(
+            string::utf8(PACKAGE_MANAGER_OBJECT_NAME),
+            signer::address_of(pakage_manager_signer)
+        );
+        move_to(
+            pakage_manager_signer,
+            AdministrativeData { operator: @deployer, governance: @deployer }
+        );
     }
-
 
     /// Can be called by friended modules to obtain the resource account signer.
     public(friend) fun get_signer(): signer acquires PermissionConfig {
@@ -64,9 +72,7 @@ module pictor_network::package_manager {
 
     /// Can only be called by the governance to publish new modules or upgrade existing modules in this package.
     public entry fun upgrade(
-        governance: &signer,
-        package_metadata: vector<u8>,
-        code: vector<vector<u8>>,
+        governance: &signer, package_metadata: vector<u8>, code: vector<vector<u8>>
     ) acquires AdministrativeData, PermissionConfig {
         validate_governance(governance);
         code::publish_package_txn(&get_signer(), package_metadata, code);
@@ -83,7 +89,7 @@ module pictor_network::package_manager {
     inline fun validate_governance(governance: &signer) {
         assert!(
             safe_admin_data().governance == signer::address_of(governance),
-            ENOT_AUTHORIZED,
+            ENOT_AUTHORIZED
         );
     }
 
@@ -103,13 +109,18 @@ module pictor_network::package_manager {
     public fun initialize_for_test(deployer: &signer) {
         let deployer_addr = signer::address_of(deployer);
         if (!exists<PermissionConfig>(deployer_addr)) {
-            aptos_framework::timestamp::set_time_has_started_for_testing(&account::create_signer_for_test(@0x1));
+            aptos_framework::timestamp::set_time_has_started_for_testing(
+                &account::create_signer_for_test(@0x1)
+            );
 
             account::create_account_for_test(deployer_addr);
-            move_to(deployer, PermissionConfig {
-                addresses: smart_table::new<String, address>(),
-                signer_cap: account::create_test_signer_cap(deployer_addr),
-            });
+            move_to(
+                deployer,
+                PermissionConfig {
+                    addresses: smart_table::new<String, address>(),
+                    signer_cap: account::create_test_signer_cap(deployer_addr)
+                }
+            );
         };
     }
 }

@@ -2,28 +2,28 @@ module pictor_network::pictor_config {
     use std::signer;
     use std::signer::address_of;
     use std::string;
-    // use std::vector;
+    use std::vector;
 
     use aptos_framework::account;
     use aptos_framework::account::SignerCapability;
 
     use pictor_network::package_manager;
-    use pictor_network::pictor_network;
+    friend pictor_network::pictor_network;
 
     const MODULE_NAME: vector<u8> = b"MANAGER";
-
-    /// Not authorized to perform this action
-    const ENOT_AUTHORIZED: u64 = 1;
+    const ENOT_AUTHORIZED: u64 = 0x1;
+    const ENOT_INITIALIZED: u64 = 0x2;
+    const EOPERATOR_EXISTS: u64 = 0x3;
 
     struct SignerConfig has store, key {
         signer_cap: SignerCapability
     }
 
     struct Config has store, key {
-        operator: address,
+        operators: vector<address>,
         is_pause: bool,
         treasury_addr: address,
-        worker_earning_percentage: u64,
+        worker_earning_percentage: u64
     }
 
     #[view]
@@ -42,11 +42,7 @@ module pictor_network::pictor_config {
         )
     }
 
-    public entry fun initialize<CoinType>(
-        owner: &signer, treasury_addr: address
-    ) {
-        assert!(address_of(owner) == @deployer, ENOT_AUTHORIZED);
-        pictor_network::initialize(treasury_addr);
+    public(friend) fun initialize(treasury_addr: address) {
         if (is_initialized()) { return };
         let (module_signer, signer_cap) =
             account::create_resource_account(
@@ -57,7 +53,7 @@ module pictor_network::pictor_config {
         move_to(
             &module_signer,
             Config {
-                operator: signer::address_of(owner),
+                operators: vector::empty<address>(),
                 is_pause: false,
                 treasury_addr,
                 worker_earning_percentage: 6000
@@ -68,11 +64,24 @@ module pictor_network::pictor_config {
         )
     }
 
-    public entry fun set_operator(owner: &signer, new_operatorer: address) acquires Config {
+    public entry fun add_operator(owner: &signer, new_operatorer: address) acquires Config {
         let config = unchecked_config();
         assert!(address_of(owner) == @deployer, ENOT_AUTHORIZED);
-        config.operator = new_operatorer;
-    } 
+
+        if (!vector::contains(&config.operators, &new_operatorer)) {
+            vector::push_back(&mut config.operators, new_operatorer);
+        }
+    }
+
+    public entry fun remove_operator(owner: &signer, operator: address) acquires Config {
+        let config = unchecked_config();
+        assert!(address_of(owner) == @deployer, ENOT_AUTHORIZED);
+
+        let (found, index) = vector::index_of(&config.operators, &operator);
+        if (found) {
+            vector::remove(&mut config.operators, index);
+        }
+    }
 
     inline fun unchecked_config(): &mut Config {
         borrow_global_mut<Config>(storage_address())
@@ -86,5 +95,11 @@ module pictor_network::pictor_config {
     #[view]
     public fun treasury_addr(): address acquires Config {
         get_config().treasury_addr
+    }
+
+    #[view]
+    public fun is_operator(addr: address): bool acquires Config {
+        let config = get_config();
+        vector::contains(&config.operators, &addr)
     }
 }

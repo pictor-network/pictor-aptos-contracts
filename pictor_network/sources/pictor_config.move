@@ -10,6 +10,8 @@ module pictor_network::pictor_config {
     use pictor_network::package_manager;
     friend pictor_network::pictor_network;
 
+    const DENOMINATOR: u64 = 10000;
+
     const MODULE_NAME: vector<u8> = b"MANAGER";
     const ENOT_AUTHORIZED: u64 = 0x1;
     const ENOT_INITIALIZED: u64 = 0x2;
@@ -101,5 +103,15 @@ module pictor_network::pictor_config {
     public fun is_operator(addr: address): bool acquires Config {
         let config = get_config();
         vector::contains(&config.operators, &addr)
+    }
+
+    #[view]
+    public fun get_denominator(): u64 {
+        DENOMINATOR
+    }
+
+    #[view]
+    public fun get_worker_earning_percentage(): u64 acquires Config {
+        get_config().worker_earning_percentage
     }
 }

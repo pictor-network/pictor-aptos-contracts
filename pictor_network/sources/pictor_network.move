@@ -48,7 +48,7 @@ module pictor_network::pictor_network {
         is_completed: bool
     }
 
-    public fun initialize(owner: &signer, treasury_addr: address) {
+    public entry fun initialize(owner: &signer, treasury_addr: address) {
         assert!(signer::address_of(owner) == @deployer, ENOT_AUTHORIZED);
         if (is_initialized()) { return };
         pictor_config::initialize(treasury_addr);

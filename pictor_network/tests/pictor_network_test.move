@@ -20,7 +20,7 @@ module pictor_network::pictor_network_test {
         initialize(admin, signer::address_of(operator));
         pictor_network::register_user(user);
         let user_addr = signer::address_of(user);
-        let (balance, credit) = pictor_network::get_user_info(user_addr);
+        let (balance, credit) = pictor_network::get_user_balance(user_addr);
         assert!(balance == 0 && credit == 0, 0x2);
     }
 
@@ -33,7 +33,7 @@ module pictor_network::pictor_network_test {
         let user_addr = signer::address_of(user);
         pictor_network::register_worker(user, string::utf8(b"worker1"));
         assert!(
-            pictor_network::is_worker_registered(user_addr, string::utf8(b"worker1")),
+            pictor_network::get_worker_owner(string::utf8(b"worker1")) == user_addr,
             0x3
         );
     }
@@ -49,7 +49,7 @@ module pictor_network::pictor_network_test {
         pictor_network::op_register_worker(operator, user_addr, worker_id);
 
         assert!(
-            pictor_network::is_worker_registered(user_addr, string::utf8(b"worker1")),
+            pictor_network::get_worker_owner(string::utf8(b"worker1")) == user_addr,
             0x3
         );
     }
@@ -86,6 +86,7 @@ module pictor_network::pictor_network_test {
         pictor_network::register_user(user);
         pictor_network::op_register_worker(operator, user_addr, worker_id);
         pictor_network::op_create_job(operator, user_addr, job_id);
+        pictor_network::op_credit_user(operator, user_addr, task_cost);
         pictor_network::op_add_task(
             operator,
             user_addr,
@@ -103,6 +104,29 @@ module pictor_network::pictor_network_test {
             tasks == 1 && payment == task_cost && !is_completed,
             0x2
         );
+    }
+
+    #[test(admin = @0xcafe, operator = @0xdad, user = @0xdead)]
+    public fun op_credit_and_debit_user(
+        admin: &signer, operator: &signer, user: &signer
+    ) {
+        let user_addr = signer::address_of(user);
+        initialize(admin, signer::address_of(operator));
+        pictor_network::register_user(user);
+
+        let value = 100;
+
+        pictor_network::op_credit_user(operator, user_addr, value);
+
+        let (balance, credit) = pictor_network::get_user_balance(user_addr);
+
+        assert!(balance == 0 && credit == value, 0x2);
+
+        pictor_network::op_debit_user(operator, user_addr, value);
+
+        let (balance_after, credit_after) = pictor_network::get_user_balance(user_addr);
+
+        assert!(balance_after == 0 && credit_after == 0, 0x3);
     }
 
     fun initialize(admin: &signer, operator_addr: address) {

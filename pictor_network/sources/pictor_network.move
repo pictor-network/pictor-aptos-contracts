@@ -25,18 +25,14 @@ module pictor_network::pictor_network {
     }
 
     struct GlobalData has key {
-        workers: Table<String, address>
+        workers: Table<String, address>,
+        users: Table<address, UserInfo>
     }
 
     struct UserInfo has key, store {
         balance: u64,
         credit: u64,
-        workers: vector<String>,
         jobs: Table<String, Job>
-    }
-
-    struct Worker has store {
-        owner: address
     }
 
     struct Task has store {
@@ -64,7 +60,8 @@ module pictor_network::pictor_network {
         move_to(
             &module_signer,
             GlobalData {
-                workers: table::new<String, address>()
+                workers: table::new<String, address>(),
+                users: table::new<address, UserInfo>()
             }
         );
         package_manager::add_address(
@@ -72,39 +69,40 @@ module pictor_network::pictor_network {
         )
     }
 
-    public entry fun register_user(user: &signer) {
+    public entry fun register_user(user: &signer) acquires GlobalData {
         let user_address = signer::address_of(user);
-        if (!exists<UserInfo>(user_address)) {
-            move_to(
-                user,
+        let global = mut_global_data();
+        if (!table::contains<address, UserInfo>(&global.users, user_address)) {
+            table::add(
+                &mut global.users,
+                user_address,
                 UserInfo {
                     balance: 0,
                     credit: 0,
-                    workers: vector::empty<String>(),
                     jobs: table::new<String, Job>()
                 }
             );
-        };
+        }
     }
 
-    public entry fun register_worker(user: &signer, worker_id: String) acquires UserInfo, GlobalData {
+    public entry fun register_worker(user: &signer, worker_id: String) acquires GlobalData {
         register_worker_internal(signer::address_of(user), worker_id);
     }
 
     public entry fun op_register_worker(
         operator: &signer, user_addr: address, worker_id: String
-    ) acquires UserInfo, GlobalData {
+    ) acquires GlobalData {
         assert_is_operator(operator);
         register_worker_internal(user_addr, worker_id);
     }
 
     public entry fun op_create_job(
         operator: &signer, user_addr: address, job_id: String
-    ) acquires UserInfo {
+    ) acquires GlobalData {
         assert_is_operator(operator);
         assert_user_registered(user_addr);
 
-        let user_info = borrow_global_mut<UserInfo>(user_addr);
+        let user_info = mut_user_info(user_addr);
         assert!(
             !table::contains<String, Job>(&user_info.jobs, job_id),
             EJOB_EXISTS
@@ -129,11 +127,11 @@ module pictor_network::pictor_network {
         worker_id: String,
         cost: u64,
         duration: u64
-    ) acquires UserInfo {
+    ) acquires GlobalData {
         assert_is_operator(operator);
         assert_job_created(user_addr, job_id);
 
-        let user_info = borrow_global_mut<UserInfo>(user_addr);
+        let user_info = mut_user_info(user_addr);
 
         assert!(
             user_info.credit + user_info.balance >= cost,
@@ -159,31 +157,66 @@ module pictor_network::pictor_network {
 
     public entry fun op_complete_job(
         operator: &signer, user_addr: address, job_id: String
-    ) acquires UserInfo, GlobalData {
+    ) acquires GlobalData {
         assert_is_operator(operator);
         assert_job_created(user_addr, job_id);
 
-        let user_info = borrow_global_mut<UserInfo>(user_addr);
+        let global = mut_global_data();
+
+        let user_info = table::borrow_mut<address, UserInfo>(
+            &mut global.users, user_addr
+        );
         let job = table::borrow_mut(&mut user_info.jobs, job_id);
         job.is_completed = true;
 
         let worker_percentage = pictor_config::get_worker_earning_percentage();
         let denominator = pictor_config::get_denominator();
 
-        let global = get_global_data();
+        // let user_info = table::borrow<address, UserInfo>(&mut global.users, user_addr);
+        // let job = table::borrow(&user_info.jobs, job_id);
 
         let i = vector::length(&job.tasks);
         while (i > 0) {
             i = i - 1;
+            let user_info = table::borrow<address, UserInfo>(
+                &mut global.users, user_addr
+            );
+            let job = table::borrow(&user_info.jobs, job_id);
             let task = vector::borrow(&job.tasks, i);
+            let cost = task.cost;
             let owner_addr =
                 table::borrow<String, address>(&global.workers, task.worker_id);
 
             // Add payment to worker's owner
-            let owner_info = borrow_global_mut<UserInfo>(*owner_addr);
-            owner_info.balance =
-                owner_info.balance + task.cost * worker_percentage / denominator;
+            let owner_info =
+                table::borrow_mut<address, UserInfo>(&mut global.users, *owner_addr);
+            owner_info.balance = owner_info.balance
+                + cost * worker_percentage / denominator;
         };
+    }
+
+    public entry fun op_credit_user(
+        operator: &signer, user_addr: address, amount: u64
+    ) acquires GlobalData {
+        assert_is_operator(operator);
+        assert_user_registered(user_addr);
+
+        let user_info = mut_user_info(user_addr);
+        user_info.credit = user_info.credit + amount;
+    }
+
+    public entry fun op_debit_user(
+        operator: &signer, user_addr: address, amount: u64
+    ) acquires GlobalData {
+        assert_is_operator(operator);
+        assert_user_registered(user_addr);
+
+        let user_info = mut_user_info(user_addr);
+        assert!(
+            user_info.credit >= amount,
+            EInsufficentBalance
+        );
+        user_info.credit = user_info.credit - amount;
     }
 
     inline fun get_global_data(): &GlobalData acquires GlobalData {
@@ -196,23 +229,32 @@ module pictor_network::pictor_network {
         )
     }
 
-    #[view]
-    public fun get_user_info(user: address): (u64, u64) acquires UserInfo {
-        let userInfo = borrow_global<UserInfo>(user);
-        (userInfo.balance, userInfo.credit)
+    inline fun get_user_info(user_addr: address): &UserInfo acquires GlobalData {
+        let global = get_global_data();
+        table::borrow<address, UserInfo>(&global.users, user_addr)
+    }
+
+    inline fun mut_user_info(user_addr: address): &mut UserInfo acquires GlobalData {
+        let global = mut_global_data();
+        table::borrow_mut<address, UserInfo>(&mut global.users, user_addr)
     }
 
     #[view]
-    public fun is_worker_registered(user: address, worker_id: String): bool acquires UserInfo {
-        assert!(exists<UserInfo>(user), EUSER_NOT_REGISTERED);
-        let user_info = borrow_global<UserInfo>(user);
-        vector::contains(&user_info.workers, &worker_id)
+    public fun get_user_balance(user_addr: address): (u64, u64) acquires GlobalData {
+        let user_info = get_user_info(user_addr);
+        (user_info.balance, user_info.credit)
     }
 
     #[view]
-    public fun get_job_info(user_addr: address, job_id: String): (u64, u64, bool) acquires UserInfo {
-        assert_job_created(user_addr, job_id);
-        let user_info = borrow_global<UserInfo>(user_addr);
+    public fun get_worker_owner(worker_id: String): address acquires GlobalData {
+        let global = get_global_data();
+        let owner_addr = table::borrow(&global.workers, worker_id);
+        *owner_addr
+    }
+
+    #[view]
+    public fun get_job_info(user_addr: address, job_id: String): (u64, u64, bool) acquires GlobalData {
+        let user_info = get_user_info(user_addr);
         assert!(
             table::contains<String, Job>(&user_info.jobs, job_id),
             EJOB_NOT_FOUND
@@ -232,25 +274,24 @@ module pictor_network::pictor_network {
         );
     }
 
-    fun assert_user_registered(user: address) {
-        assert!(exists<UserInfo>(user), EUSER_NOT_REGISTERED);
+    fun assert_user_registered(user_addr: address) acquires GlobalData {
+        let global = get_global_data();
+        assert!(
+            table::contains<address, UserInfo>(&global.users, user_addr),
+            EUSER_NOT_REGISTERED
+        );
     }
 
-    fun assert_job_created(user_addr: address, job_id: String) acquires UserInfo {
-        assert_user_registered(user_addr);
-        let user_info = borrow_global<UserInfo>(user_addr);
+    fun assert_job_created(user_addr: address, job_id: String) acquires GlobalData {
+        let global = get_global_data();
+        let user_info = table::borrow<address, UserInfo>(&global.users, user_addr);
         assert!(
             table::contains<String, Job>(&user_info.jobs, job_id),
             EJOB_NOT_FOUND
         );
     }
 
-    fun register_worker_internal(user_addr: address, worker_id: String) acquires UserInfo, GlobalData {
-        assert_user_registered(user_addr);
-        let user_info = borrow_global_mut<UserInfo>(user_addr);
-        assert!(!vector::contains(&user_info.workers, &worker_id), EWORKER_REGISTERED);
-        vector::push_back(&mut user_info.workers, worker_id);
-
+    fun register_worker_internal(user_addr: address, worker_id: String) acquires GlobalData {
         let global = mut_global_data();
         if (!table::contains<String, address>(&global.workers, worker_id)) {
             table::add(&mut global.workers, worker_id, user_addr);

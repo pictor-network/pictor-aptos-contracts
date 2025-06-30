@@ -11,6 +11,7 @@ module pictor_network::pictor_network {
     use pictor_network::pictor_config;
 
     const MODULE_NAME: vector<u8> = b"PICTOR_NETWORK";
+    const EINITIALIZED: u64 = 0;
     const ENOT_AUTHORIZED: u64 = 1;
     const ENOT_INITIALIZED: u64 = 2;
     const EUSER_NOT_REGISTERED: u64 = 3;
@@ -50,7 +51,7 @@ module pictor_network::pictor_network {
 
     public entry fun initialize(owner: &signer, treasury_addr: address) {
         assert!(signer::address_of(owner) == @deployer, ENOT_AUTHORIZED);
-        if (is_initialized()) { return };
+        assert!(!is_initialized(), EINITIALIZED);
         pictor_config::initialize(treasury_addr);
         let (module_signer, signer_cap) =
             account::create_resource_account(
@@ -71,21 +72,12 @@ module pictor_network::pictor_network {
 
     public entry fun register_user(user: &signer) acquires GlobalData {
         let user_address = signer::address_of(user);
-        let global = mut_global_data();
-        if (!table::contains<address, UserInfo>(&global.users, user_address)) {
-            table::add(
-                &mut global.users,
-                user_address,
-                UserInfo {
-                    balance: 0,
-                    credit: 0,
-                    jobs: table::new<String, Job>()
-                }
-            );
-        }
+        assert!(is_initialized(), ENOT_INITIALIZED);
+        register_user_internal(user_address);
     }
 
     public entry fun register_worker(user: &signer, worker_id: String) acquires GlobalData {
+        assert!(is_initialized(), ENOT_INITIALIZED);
         register_worker_internal(signer::address_of(user), worker_id);
     }
 
@@ -100,7 +92,7 @@ module pictor_network::pictor_network {
         operator: &signer, user_addr: address, job_id: String
     ) acquires GlobalData {
         assert_is_operator(operator);
-        assert_user_registered(user_addr);
+        register_user_internal(user_addr);
 
         let user_info = mut_user_info(user_addr);
         assert!(
@@ -172,9 +164,6 @@ module pictor_network::pictor_network {
         let worker_percentage = pictor_config::get_worker_earning_percentage();
         let denominator = pictor_config::get_denominator();
 
-        // let user_info = table::borrow<address, UserInfo>(&mut global.users, user_addr);
-        // let job = table::borrow(&user_info.jobs, job_id);
-
         let i = vector::length(&job.tasks);
         while (i > 0) {
             i = i - 1;
@@ -199,7 +188,7 @@ module pictor_network::pictor_network {
         operator: &signer, user_addr: address, amount: u64
     ) acquires GlobalData {
         assert_is_operator(operator);
-        assert_user_registered(user_addr);
+        register_user_internal(user_addr);
 
         let user_info = mut_user_info(user_addr);
         user_info.credit = user_info.credit + amount;
@@ -291,7 +280,23 @@ module pictor_network::pictor_network {
         );
     }
 
+    fun register_user_internal(user_addr: address) acquires GlobalData {
+        let global = mut_global_data();
+        if (!table::contains<address, UserInfo>(&global.users, user_addr)) {
+            table::add(
+                &mut global.users,
+                user_addr,
+                UserInfo {
+                    balance: 0,
+                    credit: 0,
+                    jobs: table::new<String, Job>()
+                }
+            );
+        }
+    }
+
     fun register_worker_internal(user_addr: address, worker_id: String) acquires GlobalData {
+        register_user_internal(user_addr);
         let global = mut_global_data();
         if (!table::contains<String, address>(&global.workers, worker_id)) {
             table::add(&mut global.workers, worker_id, user_addr);

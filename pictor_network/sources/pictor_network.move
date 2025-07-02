@@ -253,6 +253,34 @@ module pictor_network::pictor_network {
     }
 
     #[view]
+    public fun get_job_info_by_worker(
+        user_addr: address, job_id: String, worker_id: String
+    ): (u64, u64, bool) acquires GlobalData {
+        let user_info = get_user_info(user_addr);
+        assert!(
+            table::contains<String, Job>(&user_info.jobs, job_id),
+            EJOB_NOT_FOUND
+        );
+        let job = table::borrow(&user_info.jobs, job_id);
+        let worker_percentage = pictor_config::get_worker_earning_percentage();
+        let denominator = pictor_config::get_denominator();
+        let task_count = 0;
+        let payment = 0;
+        let i = vector::length(&job.tasks);
+        while (i > 0) {
+            i = i - 1;
+            let task = vector::borrow(&job.tasks, i);
+
+            if (task.worker_id == worker_id) {
+                task_count = task_count + 1;
+                payment = payment + task.cost;
+            }
+        };
+
+        (task_count, payment * worker_percentage / denominator, job.is_completed)
+    }
+
+    #[view]
     public fun is_initialized(): bool {
         package_manager::address_exists(string::utf8(MODULE_NAME))
     }

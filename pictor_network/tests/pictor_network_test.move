@@ -104,6 +104,18 @@ module pictor_network::pictor_network_test {
             tasks == 1 && payment == task_cost && !is_completed,
             0x2
         );
+
+        let percentage = pictor_config::get_worker_earning_percentage();
+        let denominator = pictor_config::get_denominator();
+
+        let (worker_task_count, worker_task_payment, is_completed) =
+            pictor_network::get_job_info_by_worker(user_addr, job_id, worker_id);
+        assert!(
+            worker_task_count == 1
+                && worker_task_payment == task_cost * percentage / denominator
+                && !is_completed,
+            0x3
+        );
     }
 
     #[test(admin = @0xcafe, operator = @0xdad, user = @0xdead)]

@@ -6,6 +6,10 @@ module pictor_network::pictor_network {
     use aptos_std::table::{Self, Table};
     use aptos_framework::account;
     use aptos_framework::account::SignerCapability;
+    use aptos_framework::object::{Self, Object};
+    use aptos_framework::fungible_asset::{Self, FungibleStore, Metadata};
+    use aptos_framework::dispatchable_fungible_asset;
+    use aptos_framework::primary_fungible_store;
 
     use pictor_network::package_manager;
     use pictor_network::pictor_config;
@@ -19,7 +23,8 @@ module pictor_network::pictor_network {
     const EWORKER_REGISTERED: u64 = 5;
     const EJOB_NOT_FOUND: u64 = 6;
     const EJOB_EXISTS: u64 = 7;
-    const EInsufficentBalance: u64 = 8;
+    const EINSUFFICENT_BALANCE: u64 = 8;
+    const ENOT_SUPPORTED_TOKEN: u64 = 9;
 
     struct SignerConfig has store, key {
         signer_cap: SignerCapability
@@ -27,7 +32,8 @@ module pictor_network::pictor_network {
 
     struct GlobalData has key {
         workers: Table<String, address>,
-        users: Table<address, UserInfo>
+        users: Table<address, UserInfo>,
+        vault: Table<Object<Metadata>, Object<FungibleStore>>
     }
 
     struct UserInfo has key, store {
@@ -49,7 +55,9 @@ module pictor_network::pictor_network {
         is_completed: bool
     }
 
-    public entry fun initialize(owner: &signer, treasury_addr: address) {
+    public entry fun initialize(
+        owner: &signer, payment_token: Object<Metadata>, treasury_addr: address
+    ) {
         assert!(signer::address_of(owner) == @deployer, ENOT_AUTHORIZED);
         assert!(!is_initialized(), EINITIALIZED);
         pictor_config::initialize(treasury_addr);
@@ -58,11 +66,17 @@ module pictor_network::pictor_network {
                 &package_manager::get_signer(), MODULE_NAME
             );
         move_to(&module_signer, SignerConfig { signer_cap });
+
+        let constructor_ref = &object::create_object(signer::address_of(&module_signer));
+        let store = fungible_asset::create_store(constructor_ref, payment_token);
+        let vault = table::new<Object<Metadata>, Object<FungibleStore>>();
+        table::add(&mut vault, payment_token, store);
         move_to(
             &module_signer,
             GlobalData {
                 workers: table::new<String, address>(),
-                users: table::new<address, UserInfo>()
+                users: table::new<address, UserInfo>(),
+                vault
             }
         );
         package_manager::add_address(
@@ -127,7 +141,7 @@ module pictor_network::pictor_network {
 
         assert!(
             user_info.credit + user_info.balance >= cost,
-            EInsufficentBalance
+            EINSUFFICENT_BALANCE
         );
 
         // Deduct payment from user, credit first, then balance
@@ -203,9 +217,71 @@ module pictor_network::pictor_network {
         let user_info = mut_user_info(user_addr);
         assert!(
             user_info.credit >= amount,
-            EInsufficentBalance
+            EINSUFFICENT_BALANCE
         );
         user_info.credit = user_info.credit - amount;
+    }
+
+    public entry fun deposit(
+        user: &signer, amount: u64, token: Object<Metadata>
+    ) acquires GlobalData {
+        assert!(
+            table::contains<Object<Metadata>, Object<FungibleStore>>(
+                &get_global_data().vault, token
+            ),
+            ENOT_SUPPORTED_TOKEN
+        );
+        let user_address = signer::address_of(user);
+        assert!(is_initialized(), ENOT_INITIALIZED);
+        register_user_internal(user_address);
+
+        let global = mut_global_data();
+        let user_info =
+            table::borrow_mut<address, UserInfo>(&mut global.users, user_address);
+        user_info.balance = user_info.balance + amount;
+
+        let fungigle_token = dispatchable_fungible_asset::withdraw(user, token, amount);
+
+        let store =
+            table::borrow<Object<Metadata>, Object<FungibleStore>>(
+                &mut global.vault, token
+            );
+
+        // Deposit to vault
+        dispatchable_fungible_asset::deposit(*store, fungigle_token);
+    }
+
+    public entry fun withdraw(
+        user: &signer, amount: u64, token: Object<Metadata>
+    ) acquires GlobalData, SignerConfig {
+        assert!(
+            table::contains<Object<Metadata>, Object<FungibleStore>>(
+                &get_global_data().vault, token
+            ),
+            ENOT_SUPPORTED_TOKEN
+        );
+        let user_address = signer::address_of(user);
+        assert!(is_initialized(), ENOT_INITIALIZED);
+        assert_user_registered(user_address);
+
+        let global = mut_global_data();
+        let user_info =
+            table::borrow_mut<address, UserInfo>(&mut global.users, user_address);
+        assert!(
+            user_info.balance >= amount,
+            EINSUFFICENT_BALANCE
+        );
+        user_info.balance = user_info.balance - amount;
+
+        let store =
+            table::borrow<Object<Metadata>, Object<FungibleStore>>(
+                &mut global.vault, token
+            );
+
+        // Withdraw from vault
+        let fungible_token =
+            dispatchable_fungible_asset::withdraw(&get_signer(), *store, amount);
+        primary_fungible_store::deposit(signer::address_of(user), fungible_token);
     }
 
     inline fun get_global_data(): &GlobalData acquires GlobalData {
@@ -329,5 +405,13 @@ module pictor_network::pictor_network {
         if (!table::contains<String, address>(&global.workers, worker_id)) {
             table::add(&mut global.workers, worker_id, user_addr);
         }
+    }
+
+    fun get_signer(): signer acquires SignerConfig {
+        let signer_config =
+            borrow_global<SignerConfig>(
+                package_manager::get_address(string::utf8(MODULE_NAME))
+            );
+        account::create_signer_with_capability(&signer_config.signer_cap)
     }
 }

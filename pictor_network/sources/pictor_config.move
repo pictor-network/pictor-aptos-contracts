@@ -95,7 +95,7 @@ module pictor_network::pictor_config {
 
     // Get treasury address
     #[view]
-    public fun treasury_addr(): address acquires Config {
+    public fun get_treasury_address(): address acquires Config {
         get_config().treasury_addr
     }
 

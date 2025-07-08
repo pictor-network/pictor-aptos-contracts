@@ -85,8 +85,8 @@ module pictor_network::pictor_network {
     }
 
     public entry fun register_user(user: &signer) acquires GlobalData {
-        let user_address = signer::address_of(user);
         assert!(is_initialized(), ENOT_INITIALIZED);
+        let user_address = signer::address_of(user);
         register_user_internal(user_address);
     }
 
@@ -225,14 +225,8 @@ module pictor_network::pictor_network {
     public entry fun deposit(
         user: &signer, amount: u64, token: Object<Metadata>
     ) acquires GlobalData {
-        assert!(
-            table::contains<Object<Metadata>, Object<FungibleStore>>(
-                &get_global_data().vault, token
-            ),
-            ENOT_SUPPORTED_TOKEN
-        );
+        assert_token_supported(token);
         let user_address = signer::address_of(user);
-        assert!(is_initialized(), ENOT_INITIALIZED);
         register_user_internal(user_address);
 
         let global = mut_global_data();
@@ -240,7 +234,7 @@ module pictor_network::pictor_network {
             table::borrow_mut<address, UserInfo>(&mut global.users, user_address);
         user_info.balance = user_info.balance + amount;
 
-        let fungigle_token = dispatchable_fungible_asset::withdraw(user, token, amount);
+        let fungigle_token = primary_fungible_store::withdraw(user, token, amount);
 
         let store =
             table::borrow<Object<Metadata>, Object<FungibleStore>>(
@@ -254,34 +248,39 @@ module pictor_network::pictor_network {
     public entry fun withdraw(
         user: &signer, amount: u64, token: Object<Metadata>
     ) acquires GlobalData, SignerConfig {
-        assert!(
-            table::contains<Object<Metadata>, Object<FungibleStore>>(
-                &get_global_data().vault, token
-            ),
-            ENOT_SUPPORTED_TOKEN
-        );
+        assert_token_supported(token);
         let user_address = signer::address_of(user);
-        assert!(is_initialized(), ENOT_INITIALIZED);
         assert_user_registered(user_address);
 
-        let global = mut_global_data();
-        let user_info =
-            table::borrow_mut<address, UserInfo>(&mut global.users, user_address);
+        let user_info = mut_user_info(user_address);
         assert!(
             user_info.balance >= amount,
             EINSUFFICENT_BALANCE
         );
         user_info.balance = user_info.balance - amount;
 
-        let store =
-            table::borrow<Object<Metadata>, Object<FungibleStore>>(
-                &mut global.vault, token
-            );
+        let store = get_vault_store(token);
 
         // Withdraw from vault
         let fungible_token =
             dispatchable_fungible_asset::withdraw(&get_signer(), *store, amount);
         primary_fungible_store::deposit(signer::address_of(user), fungible_token);
+    }
+
+    public entry fun op_withdraw(
+        operator: &signer, amount: u64, token: Object<Metadata>
+    ) acquires GlobalData, SignerConfig {
+        assert_is_operator(operator);
+        assert_token_supported(token);
+
+        let store = get_vault_store(token);
+
+        // Withdraw from vault
+        let fungible_token =
+            dispatchable_fungible_asset::withdraw(&get_signer(), *store, amount);
+        primary_fungible_store::deposit(
+            pictor_config::get_treasury_address(), fungible_token
+        );
     }
 
     inline fun get_global_data(): &GlobalData acquires GlobalData {
@@ -302,6 +301,17 @@ module pictor_network::pictor_network {
     inline fun mut_user_info(user_addr: address): &mut UserInfo acquires GlobalData {
         let global = mut_global_data();
         table::borrow_mut<address, UserInfo>(&mut global.users, user_addr)
+    }
+
+    inline fun get_vault_store(token: Object<Metadata>): &Object<FungibleStore> acquires GlobalData {
+        let global = get_global_data();
+        assert!(
+            table::contains<Object<Metadata>, Object<FungibleStore>>(
+                &global.vault, token
+            ),
+            ENOT_SUPPORTED_TOKEN
+        );
+        table::borrow<Object<Metadata>, Object<FungibleStore>>(&global.vault, token)
     }
 
     #[view]
@@ -357,6 +367,20 @@ module pictor_network::pictor_network {
     }
 
     #[view]
+    public fun get_vault_balance(token: Object<Metadata>): u64 acquires GlobalData {
+        assert!(
+            table::contains<Object<Metadata>, Object<FungibleStore>>(
+                &get_global_data().vault, token
+            ),
+            ENOT_SUPPORTED_TOKEN
+        );
+        let global = get_global_data();
+        let store =
+            table::borrow<Object<Metadata>, Object<FungibleStore>>(&global.vault, token);
+        fungible_asset::balance(*store)
+    }
+
+    #[view]
     public fun is_initialized(): bool {
         package_manager::address_exists(string::utf8(MODULE_NAME))
     }
@@ -381,6 +405,16 @@ module pictor_network::pictor_network {
         assert!(
             table::contains<String, Job>(&user_info.jobs, job_id),
             EJOB_NOT_FOUND
+        );
+    }
+
+    fun assert_token_supported(token: Object<Metadata>) acquires GlobalData {
+        let global = get_global_data();
+        assert!(
+            table::contains<Object<Metadata>, Object<FungibleStore>>(
+                &global.vault, token
+            ),
+            ENOT_SUPPORTED_TOKEN
         );
     }
 

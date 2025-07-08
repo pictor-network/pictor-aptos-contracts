@@ -232,7 +232,7 @@ module pictor_network::pictor_network {
         let global = mut_global_data();
         let user_info =
             table::borrow_mut<address, UserInfo>(&mut global.users, user_address);
-        user_info.balance = user_info.balance + amount;
+        user_info.credit = user_info.credit + amount;
 
         let fungigle_token = primary_fungible_store::withdraw(user, token, amount);
 

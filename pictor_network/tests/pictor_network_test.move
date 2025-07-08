@@ -156,24 +156,21 @@ module pictor_network::pictor_network_test {
         pictor_network::deposit(user, deposit_amount, usdt::metadata());
 
         let (balance, credit) = pictor_network::get_user_balance(user_addr);
-        assert!(balance == deposit_amount && credit == 0, 0x2);
+        assert!(balance == 0 && credit == deposit_amount, 0x2);
 
         let usdt_balance = primary_fungible_store::balance(user_addr, usdt::metadata());
         assert!(usdt_balance == 0, 0x3);
 
-        pictor_network::withdraw(user, 500, usdt::metadata());
-        let (balance_after, credit_after) = pictor_network::get_user_balance(user_addr);
-        assert!(balance_after == 500 && credit_after == 0, 0x4);
         let usdt_balance_after =
             primary_fungible_store::balance(user_addr, usdt::metadata());
-        assert!(usdt_balance_after == 500, 0x5);
+        assert!(usdt_balance_after == 0, 0x5);
 
         let vault_balance = pictor_network::get_vault_balance(usdt::metadata());
-        assert!(vault_balance == 500, 0x6);
+        assert!(vault_balance == 1000, 0x6);
 
-        pictor_network::op_withdraw(operator, 500, usdt::metadata());
+        pictor_network::op_withdraw(operator, 1000, usdt::metadata());
         let admin_balance =
             primary_fungible_store::balance(signer::address_of(admin), usdt::metadata());
-        assert!(admin_balance == 500, 0x7);
+        assert!(admin_balance == 1000, 0x7);
     }
 }

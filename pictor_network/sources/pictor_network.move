@@ -315,9 +315,17 @@ module pictor_network::pictor_network {
     }
 
     #[view]
+    public fun is_registered(user_addr: address): bool acquires GlobalData {
+        let global = get_global_data();
+        table::contains<address, UserInfo>(&global.users, user_addr)
+    }
+
+    #[view]
     public fun get_user_balance(user_addr: address): (u64, u64) acquires GlobalData {
-        let user_info = get_user_info(user_addr);
-        (user_info.balance, user_info.credit)
+        if (is_registered(user_addr)) {
+            let user_info = get_user_info(user_addr);
+            (user_info.balance, user_info.credit)
+        } else { (0, 0) }
     }
 
     #[view]
@@ -392,9 +400,8 @@ module pictor_network::pictor_network {
     }
 
     fun assert_user_registered(user_addr: address) acquires GlobalData {
-        let global = get_global_data();
         assert!(
-            table::contains<address, UserInfo>(&global.users, user_addr),
+            is_registered(user_addr),
             EUSER_NOT_REGISTERED
         );
     }

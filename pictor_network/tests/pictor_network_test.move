@@ -165,10 +165,10 @@ module pictor_network::pictor_network_test {
             primary_fungible_store::balance(user_addr, usdt::metadata());
         assert!(usdt_balance_after == 0, 0x5);
 
-        let vault_balance = pictor_network::get_vault_balance(usdt::metadata());
+        let vault_balance = pictor_config::get_vault_balance(usdt::metadata());
         assert!(vault_balance == 1000, 0x6);
 
-        pictor_network::op_withdraw(operator, 1000, usdt::metadata());
+        pictor_config::withdraw_to_treasury(operator, 1000, usdt::metadata());
         let admin_balance =
             primary_fungible_store::balance(signer::address_of(admin), usdt::metadata());
         assert!(admin_balance == 1000, 0x7);

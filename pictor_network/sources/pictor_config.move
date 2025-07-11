@@ -3,19 +3,25 @@ module pictor_network::pictor_config {
     use std::signer::address_of;
     use std::string;
     use std::vector;
+    use aptos_std::table::{Self, Table};
 
     use aptos_framework::account;
     use aptos_framework::account::SignerCapability;
+    use aptos_framework::object::{Self, Object};
+    use aptos_framework::fungible_asset::{Self, FungibleAsset, FungibleStore, Metadata};
+    use aptos_framework::dispatchable_fungible_asset;
+    use aptos_framework::primary_fungible_store;
 
     use pictor_network::package_manager;
     friend pictor_network::pictor_network;
 
     const DENOMINATOR: u64 = 10000;
 
-    const MODULE_NAME: vector<u8> = b"MANAGER";
-    const ENOT_AUTHORIZED: u64 = 0x1;
-    const ENOT_INITIALIZED: u64 = 0x2;
-    const EOPERATOR_EXISTS: u64 = 0x3;
+    const MODULE_NAME: vector<u8> = b"PICTOR_CONFIG";
+    const ENOT_AUTHORIZED: u64 = 1;
+    const ENOT_INITIALIZED: u64 = 2;
+    const EOPERATOR_EXISTS: u64 = 3;
+    const ENOT_SUPPORTED_TOKEN: u64 = 4;
 
     struct SignerConfig has store, key {
         signer_cap: SignerCapability
@@ -25,7 +31,8 @@ module pictor_network::pictor_config {
         operators: vector<address>,
         is_pause: bool,
         treasury_addr: address,
-        worker_earning_percentage: u64
+        worker_earning_percentage: u64,
+        vault: Table<Object<Metadata>, Object<FungibleStore>>
     }
 
     #[view]
@@ -44,7 +51,9 @@ module pictor_network::pictor_config {
         )
     }
 
-    public(friend) fun initialize(treasury_addr: address) {
+    public(friend) fun initialize(
+        payment_token: Object<Metadata>, treasury_addr: address
+    ) {
         if (is_initialized()) { return };
         let (module_signer, signer_cap) =
             account::create_resource_account(
@@ -52,13 +61,19 @@ module pictor_network::pictor_config {
             );
         move_to(&module_signer, SignerConfig { signer_cap });
 
+        let constructor_ref = &object::create_object(signer::address_of(&module_signer));
+        let store = fungible_asset::create_store(constructor_ref, payment_token);
+        let vault = table::new<Object<Metadata>, Object<FungibleStore>>();
+        table::add(&mut vault, payment_token, store);
+
         move_to(
             &module_signer,
             Config {
                 operators: vector::empty<address>(),
                 is_pause: false,
                 treasury_addr,
-                worker_earning_percentage: 6000
+                worker_earning_percentage: 6000,
+                vault
             }
         );
         package_manager::add_address(
@@ -85,12 +100,54 @@ module pictor_network::pictor_config {
         }
     }
 
+    public entry fun withdraw_to_treasury(
+        operator: &signer, amount: u64, token: Object<Metadata>
+    ) acquires Config, SignerConfig {
+        assert!(
+            is_operator(signer::address_of(operator)),
+            ENOT_AUTHORIZED
+        );
+        assert_token_supported(token);
+
+        let store = get_vault_store(token);
+
+        // Withdraw from vault
+        let fungible_token =
+            dispatchable_fungible_asset::withdraw(&get_signer(), *store, amount);
+        primary_fungible_store::deposit(get_treasury_address(), fungible_token);
+    }
+
+    public(friend) fun deposit_vault(
+        asset: FungibleAsset, token: Object<Metadata>
+    ) acquires Config {
+        let store = get_vault_store(token);
+        dispatchable_fungible_asset::deposit(*store, asset);
+    }
+
+    public(friend) fun withdraw_vault(
+        amount: u64, token: Object<Metadata>
+    ): FungibleAsset acquires Config, SignerConfig {
+        let store = get_vault_store(token);
+        dispatchable_fungible_asset::withdraw(&get_signer(), *store, amount)
+    }
+
     inline fun unchecked_config(): &mut Config {
         borrow_global_mut<Config>(storage_address())
     }
 
     inline fun get_config(): &Config {
         borrow_global<Config>(storage_address())
+    }
+
+    inline fun get_vault_store(token: Object<Metadata>): &Object<FungibleStore> acquires Config {
+        let config = get_config();
+        assert!(
+            table::contains<Object<Metadata>, Object<FungibleStore>>(
+                &config.vault, token
+            ),
+            ENOT_SUPPORTED_TOKEN
+        );
+        table::borrow<Object<Metadata>, Object<FungibleStore>>(&config.vault, token)
     }
 
     // Get treasury address
@@ -113,5 +170,29 @@ module pictor_network::pictor_config {
     #[view]
     public fun get_worker_earning_percentage(): u64 acquires Config {
         get_config().worker_earning_percentage
+    }
+
+    #[view]
+    public fun get_vault_balance(token: Object<Metadata>): u64 acquires Config {
+        let store = get_vault_store(token);
+        fungible_asset::balance(*store)
+    }
+
+    fun assert_token_supported(token: Object<Metadata>) acquires Config {
+        let config = get_config();
+        assert!(
+            table::contains<Object<Metadata>, Object<FungibleStore>>(
+                &config.vault, token
+            ),
+            ENOT_SUPPORTED_TOKEN
+        );
+    }
+
+    fun get_signer(): signer acquires SignerConfig {
+        let signer_config =
+            borrow_global<SignerConfig>(
+                package_manager::get_address(string::utf8(MODULE_NAME))
+            );
+        account::create_signer_with_capability(&signer_config.signer_cap)
     }
 }

@@ -4,6 +4,7 @@ module pictor_network::pictor_network {
     use std::vector;
     use std::string::String;
     use aptos_std::table::{Self, Table};
+    use aptos_framework::event;
     use aptos_framework::account;
     use aptos_framework::account::SignerCapability;
     use aptos_framework::object::{Object};
@@ -51,6 +52,25 @@ module pictor_network::pictor_network {
         tasks: vector<Task>,
         payment: u64,
         is_completed: bool
+    }
+
+    #[event]
+    struct JobCreated has drop, store {
+        user_addr: address,
+        job_id: String
+    }
+
+    #[event]
+    struct TaskAdded has drop, store {
+        job_id: String,
+        task_id: u64,
+        worker_id: String,
+        cost: u64
+    }
+
+    #[event]
+    struct JobCompleted has drop, store {
+        job_id: String
     }
 
     public entry fun initialize(
@@ -116,6 +136,8 @@ module pictor_network::pictor_network {
                 is_completed: false
             }
         );
+
+        event::emit(JobCreated { user_addr, job_id });
     }
 
     public entry fun op_add_task(
@@ -152,6 +174,8 @@ module pictor_network::pictor_network {
             Task { task_id, worker_id, cost, duration }
         );
         job.payment = job.payment + cost;
+
+        event::emit(TaskAdded { job_id, task_id, worker_id, cost });
     }
 
     public entry fun op_complete_job(
@@ -189,6 +213,8 @@ module pictor_network::pictor_network {
             owner_info.balance = owner_info.balance
                 + cost * worker_percentage / denominator;
         };
+
+        event::emit(JobCompleted { job_id });
     }
 
     public entry fun op_credit_user(

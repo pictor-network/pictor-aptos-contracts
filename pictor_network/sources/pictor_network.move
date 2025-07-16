@@ -4,6 +4,12 @@ module pictor_network::pictor_network {
     use std::vector;
     use std::string::String;
     use aptos_std::table::{Self, Table};
+    use aptos_std::string_utils;
+    use aptos_std::ed25519::{
+        signature_verify_strict,
+        new_signature_from_bytes,
+        new_unvalidated_public_key_from_bytes
+    };
     use aptos_framework::event;
     use aptos_framework::account;
     use aptos_framework::account::SignerCapability;
@@ -25,6 +31,8 @@ module pictor_network::pictor_network {
     const EJOB_EXISTS: u64 = 7;
     const EINSUFFICENT_BALANCE: u64 = 8;
     const ENOT_SUPPORTED_TOKEN: u64 = 9;
+    const ECREDIT_REQUEST_EXISTS: u64 = 10;
+    const EINVALID_SIGNATURE: u64 = 11;
 
     struct SignerConfig has store, key {
         signer_cap: SignerCapability
@@ -32,7 +40,8 @@ module pictor_network::pictor_network {
 
     struct GlobalData has key {
         workers: Table<String, address>,
-        users: Table<address, UserInfo>
+        users: Table<address, UserInfo>,
+        credit_requests: Table<u64, CreditRequest>
     }
 
     struct UserInfo has key, store {
@@ -54,6 +63,11 @@ module pictor_network::pictor_network {
         is_completed: bool
     }
 
+    struct CreditRequest has store {
+        user_addr: address,
+        amount: u64
+    }
+
     #[event]
     struct JobCreated has drop, store {
         user_addr: address,
@@ -73,12 +87,16 @@ module pictor_network::pictor_network {
         job_id: String
     }
 
-    public entry fun initialize(
-        owner: &signer, payment_token: Object<Metadata>, treasury_addr: address
-    ) {
+    #[event]
+    struct CreditClaimed has drop, store {
+        user_addr: address,
+        amount: u64,
+        request_id: u64
+    }
+
+    public entry fun initialize(owner: &signer) {
         assert!(signer::address_of(owner) == @deployer, ENOT_AUTHORIZED);
         assert!(!is_initialized(), EINITIALIZED);
-        pictor_config::initialize(payment_token, treasury_addr);
         let (module_signer, signer_cap) =
             account::create_resource_account(
                 &package_manager::get_signer(), MODULE_NAME
@@ -89,7 +107,8 @@ module pictor_network::pictor_network {
             &module_signer,
             GlobalData {
                 workers: table::new<String, address>(),
-                users: table::new<address, UserInfo>()
+                users: table::new<address, UserInfo>(),
+                credit_requests: table::new<u64, CreditRequest>()
             }
         );
         package_manager::add_address(
@@ -273,6 +292,47 @@ module pictor_network::pictor_network {
         // Withdraw from vault
         let fungible_token = pictor_config::withdraw_vault(amount, token);
         primary_fungible_store::deposit(signer::address_of(user), fungible_token);
+    }
+
+    public entry fun claim_credit(
+        user: &signer,
+        amount: u64,
+        request_id: u64,
+        signature: vector<u8>
+    ) acquires GlobalData {
+        let user_addr = signer::address_of(user);
+        register_user_internal(user_addr);
+        let global = mut_global_data();
+        assert!(
+            !table::contains<u64, CreditRequest>(&global.credit_requests, request_id),
+            ECREDIT_REQUEST_EXISTS
+        );
+        let begin_of_mess: String = string::utf8(b"PICTOR\\nmessage: ");
+        string::append(&mut begin_of_mess, string_utils::to_string(&amount));
+        string::append(&mut begin_of_mess, string_utils::to_string(&request_id));
+        let upk =
+            new_unvalidated_public_key_from_bytes(pictor_config::get_admin_pubkey());
+
+        let check =
+            signature_verify_strict(
+                &new_signature_from_bytes(signature),
+                &upk,
+                *string::bytes(&begin_of_mess)
+            );
+        assert!(check, EINVALID_SIGNATURE);
+
+        let user_info = table::borrow_mut<address, UserInfo>(
+            &mut global.users, user_addr
+        );
+        user_info.credit = user_info.credit + amount;
+        table::add(
+            &mut global.credit_requests,
+            request_id,
+            CreditRequest { user_addr, amount }
+        );
+
+        event::emit(CreditClaimed { user_addr, amount, request_id });
+
     }
 
     inline fun get_global_data(): &GlobalData acquires GlobalData {

@@ -173,4 +173,31 @@ module pictor_network::pictor_network_test {
             primary_fungible_store::balance(signer::address_of(admin), usdt::metadata());
         assert!(admin_balance == 1000, 0x7);
     }
+
+    #[test(admin = @0xcafe, operator = @0xdad, user = @0xdead)]
+    public fun test_claim_credit(
+        admin: &signer, operator: &signer, user: &signer
+    ) {
+        test_helper::setup(admin);
+        pictor_config::add_operator(admin, signer::address_of(operator));
+        let user_addr = signer::address_of(user);
+
+        let claim_amount = 10000000;
+
+        pictor_network::claim_credit(
+            user,
+            10000000,
+            1,
+            vector[
+                76, 130, 129, 22, 82, 44, 249, 123, 11, 91, 16, 7, 17, 77, 63, 189, 183, 1,
+                183, 77, 148, 133, 65, 222, 71, 38, 99, 58, 73, 162, 115, 18, 131, 20, 203,
+                244, 60, 202, 64, 22, 103, 17, 39, 210, 82, 198, 55, 189, 135, 40, 4, 255,
+                32, 149, 58, 232, 218, 25, 206, 37, 162, 229, 40, 3
+            ]
+        );
+
+        let (balance, credit) = pictor_network::get_user_balance(user_addr);
+        assert!(balance == 0 && credit == claim_amount, 0x2);
+
+    }
 }

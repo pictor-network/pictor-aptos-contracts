@@ -18,6 +18,7 @@ module pictor_network::pictor_config {
     const DENOMINATOR: u64 = 10000;
 
     const MODULE_NAME: vector<u8> = b"PICTOR_CONFIG";
+    const EINITIALIZED: u64 = 0;
     const ENOT_AUTHORIZED: u64 = 1;
     const ENOT_INITIALIZED: u64 = 2;
     const EOPERATOR_EXISTS: u64 = 3;
@@ -32,6 +33,7 @@ module pictor_network::pictor_config {
         is_pause: bool,
         treasury_addr: address,
         worker_earning_percentage: u64,
+        admin_pubkey: vector<u8>,
         vault: Table<Object<Metadata>, Object<FungibleStore>>
     }
 
@@ -51,10 +53,14 @@ module pictor_network::pictor_config {
         )
     }
 
-    public(friend) fun initialize(
-        payment_token: Object<Metadata>, treasury_addr: address
+    public entry fun initialize(
+        owner: &signer,
+        payment_token: Object<Metadata>,
+        treasury_addr: address,
+        admin_pubkey: vector<u8>
     ) {
-        if (is_initialized()) { return };
+        assert!(signer::address_of(owner) == @deployer, ENOT_AUTHORIZED);
+        assert!(!is_initialized(), EINITIALIZED);
         let (module_signer, signer_cap) =
             account::create_resource_account(
                 &package_manager::get_signer(), MODULE_NAME
@@ -73,12 +79,21 @@ module pictor_network::pictor_config {
                 is_pause: false,
                 treasury_addr,
                 worker_earning_percentage: 6000,
+                admin_pubkey,
                 vault
             }
         );
         package_manager::add_address(
             string::utf8(MODULE_NAME), signer::address_of(&module_signer)
         )
+    }
+
+    public entry fun set_admin_pubkey(
+        owner: &signer, new_admin_pub: vector<u8>
+    ) acquires Config {
+        assert!(address_of(owner) == @deployer, ENOT_AUTHORIZED);
+        let config = unchecked_config();
+        config.admin_pubkey = new_admin_pub;
     }
 
     public entry fun add_operator(owner: &signer, new_operatorer: address) acquires Config {
@@ -148,6 +163,11 @@ module pictor_network::pictor_config {
             ENOT_SUPPORTED_TOKEN
         );
         table::borrow<Object<Metadata>, Object<FungibleStore>>(&config.vault, token)
+    }
+
+    #[view]
+    public fun get_admin_pubkey(): vector<u8> acquires Config {
+        get_config().admin_pubkey
     }
 
     // Get treasury address

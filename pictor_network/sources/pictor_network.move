@@ -310,6 +310,7 @@ module pictor_network::pictor_network {
         let begin_of_mess: String = string::utf8(b"PICTOR\\nmessage: ");
         string::append(&mut begin_of_mess, string_utils::to_string(&amount));
         string::append(&mut begin_of_mess, string_utils::to_string(&request_id));
+        string::append(&mut begin_of_mess, string_utils::to_string(&user_addr));
         let upk =
             new_unvalidated_public_key_from_bytes(pictor_config::get_admin_pubkey());
 
